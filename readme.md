@@ -1,5 +1,7 @@
 # mlbench-lite
 
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/mlbench-lite?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/mlbench-lite)
+
 A comprehensive machine learning benchmarking library that provides an easy way to compare multiple ML models on your dataset. Built with scikit-learn, XGBoost, LightGBM, CatBoost, and pandas for seamless integration into your ML workflow.
 
 ## 🚀 Features
