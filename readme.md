@@ -1,6 +1,26 @@
 # mlbench-lite
 
+[![Total Downloads](https://img.shields.io/pepy/dt/mlbench-lite?style=for-the-badge&color=blue)](https://pepy.tech/project/mlbench-lite)
+[![PyPI Version](https://img.shields.io/pypi/v/mlbench-lite?style=for-the-badge&color=green)](https://pypi.org/project/mlbench-lite/)
+[![License](https://img.shields.io/github/license/Arefin994/mlbench-lite?style=for-the-badge)](https://github.com/Arefin994/mlbench-lite/blob/main/LICENSE)
+
 A comprehensive machine learning benchmarking library that provides an easy way to compare multiple ML models on your dataset classification **and regression**. Built with scikit-learn, XGBoost, LightGBM, CatBoost, PyTorch, and pandas for seamless integration into your ML workflow.
+
+<details open>
+<summary><b>📋 Table of Contents</b></summary>
+<br>
+
+| | |
+|---|---|
+| • <a href="#-features">Features</a> | • <a href="#-command-line-interface">Command Line Interface</a> |
+| • <a href="#-installation">Installation</a> | • <a href="#-interactive-tui-optional--pip-install-mlbench-lite-tui">Interactive TUI</a> |
+| • <a href="#-quick-start">Quick Start</a> | • <a href="#-requirements">Requirements</a> |
+| • <a href="#-api-reference">API Reference</a> | • <a href="#-testing">Testing</a> |
+| • <a href="#-code-examples">Code Examples</a> | • <a href="#-development">Development</a> |
+| • <a href="#-models-included">Models Included</a> | • <a href="#-contributing">Contributing</a> |
+| • <a href="#-scaling-modes">Scaling Modes</a> | • <a href="#-changelog">Changelog</a> |
+
+</details>
 
 ## 🚀 Features
 
