@@ -755,7 +755,7 @@ If you use `mlbench-lite` in your research, please cite:
 
 ```bibtex
 @software{mlbench_lite2026,
-  author = {Amin, Arefin},
+  author    = {Amin, Arefin and Nahian, Tahminuzzaman},
   title = {mlbench-lite: A Lightweight Benchmarking Framework for Machine Learning Systems},
   year = {2026},
   url = {https://github.com/Arefin994/mlbench-lite},
