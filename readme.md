@@ -4,6 +4,8 @@
 [![PyPI Version](https://img.shields.io/pypi/v/mlbench-lite?style=for-the-badge&color=green)](https://pypi.org/project/mlbench-lite/)
 [![License](https://img.shields.io/github/license/Arefin994/mlbench-lite?style=for-the-badge)](https://github.com/Arefin994/mlbench-lite/blob/main/LICENSE)
 
+
+
 A comprehensive machine learning benchmarking library that provides an easy way to compare multiple ML models on your dataset classification **and regression**. Built with scikit-learn, XGBoost, LightGBM, CatBoost, PyTorch, and pandas for seamless integration into your ML workflow.
 
 <details open>
@@ -18,7 +20,7 @@ A comprehensive machine learning benchmarking library that provides an easy way 
 | • <a href="#-api-reference">API Reference</a> | • <a href="#-testing">Testing</a> |
 | • <a href="#-code-examples">Code Examples</a> | • <a href="#-development">Development</a> |
 | • <a href="#-models-included">Models Included</a> | • <a href="#-contributing">Contributing</a> |
-| • <a href="#-scaling-modes">Scaling Modes</a> | • <a href="#-changelog">Changelog</a> |
+| • <a href="#-scaling-modes">Scaling Modes</a> | • <a href="#-citation">Cite as</a> |
 
 </details>
 
@@ -776,9 +778,12 @@ If you use `mlbench-lite` in your research, please cite:
 ```bibtex
 @software{mlbench_lite2026,
   author    = {Amin, Arefin and Nahian, Tahminuzzaman},
-  title = {mlbench-lite: A Lightweight Benchmarking Framework for Machine Learning Systems},
-  year = {2026},
-  url = {https://github.com/Arefin994/mlbench-lite},
-  version = {3.3.0}
+  title     = {mlbench-lite: A Lightweight Benchmarking Framework for Machine Learning Systems},
+  month     = sep,
+  year      = {2026},
+  publisher = {Zenodo},
+  version   = {v3.3.0},
+  doi       = {10.5281/zenodo.22758232},
+  url       = {https://doi.org/10.5281/zenodo.22758232}
 }
 ```
