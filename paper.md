@@ -10,6 +10,7 @@ authors:
     orcid: 0009-0005-6177-9999
     affiliation: 1
   - name: Tahminuzzaman Nahian
+    orcid: 0009-0007-0180-6101
     affiliation: 1
 affiliations:
   - name: North South University, Dhaka, Bangladesh
