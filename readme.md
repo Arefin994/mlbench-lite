@@ -2,8 +2,6 @@
 
 A comprehensive machine learning benchmarking library that provides an easy way to compare multiple ML models on your dataset classification **and regression**. Built with scikit-learn, XGBoost, LightGBM, CatBoost, PyTorch, and pandas for seamless integration into your ML workflow.
 
-[![PyPI Downloads](https://static.pepy.tech/personalized-badge/mlbench-lite?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/mlbench-lite)
-
 ## 🚀 Features
 
 - **Comprehensive Model Support**: 40+ ML models across classification and regression, from multiple libraries, plus optional deep tabular models (Torch MLP, FT-Transformer)
@@ -750,3 +748,17 @@ If you encounter any issues or have questions:
 - Built with [scikit-learn](https://scikit-learn.org/)
 - Uses [pandas](https://pandas.pydata.org/) for data handling
 - Inspired by the need for simple ML benchmarking tools
+
+## Citation
+
+If you use `mlbench-lite` in your research, please cite:
+
+```bibtex
+@software{mlbench_lite2026,
+  author = {Amin, Arefin},
+  title = {mlbench-lite: A Lightweight Benchmarking Framework for Machine Learning Systems},
+  year = {2026},
+  url = {https://github.com/Arefin994/mlbench-lite},
+  version = {3.3.0}
+}
+```

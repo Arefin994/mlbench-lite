@@ -1,0 +1,126 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mlbench-lite"
+version = "3.3.0"
+description = "A machine learning benchmarking library for classification and regression"
+readme = "README.md"
+license = "MIT"
+authors = [
+	{name = "Arefin Amin", email = "arefinamin994@gmail.com"}
+]
+maintainers = [
+	{name = "Arefin Amin", email = "arefinamin994@gmail.com"},
+    {name = "Tahminuzzaman Nahian", email = "tahminuzzaman.nahian@gmail.com"}
+]
+keywords = ["machine learning", "benchmarking", "scikit-learn", "ml"]
+classifiers = [
+	"Development Status :: 3 - Alpha",
+	"Intended Audience :: Developers",
+	"Intended Audience :: Science/Research",
+	"Operating System :: OS Independent",
+	"Programming Language :: Python :: 3",
+	"Programming Language :: Python :: 3.8",
+	"Programming Language :: Python :: 3.9",
+	"Programming Language :: Python :: 3.10",
+	"Programming Language :: Python :: 3.11",
+	"Programming Language :: Python :: 3.12",
+	"Topic :: Scientific/Engineering :: Artificial Intelligence",
+	"Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.8"
+dependencies = [
+	"scikit-learn>=1.0.0",
+	"pandas>=1.3.0",
+	"numpy>=1.20.0",
+	"scipy>=1.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+	"pytest>=6.0",
+	"pytest-cov>=2.0",
+	"black>=21.0",
+	"flake8>=3.8",
+	"mypy>=0.800",
+]
+test = [
+	"pytest>=6.0",
+	"pytest-cov>=2.0",
+]
+# Optional gradient-boosting libraries. The package skips their models when
+# they are not installed.
+boosting = [
+	"xgboost>=1.5.0",
+	"lightgbm>=3.2.0",
+	"catboost>=1.0.0",
+]
+# Deep Tabular models (Torch MLP, FT-Transformer).
+deep = ["torch>=2.0.0"]
+# Interactive TUI (`mlbench-lite-tui`).
+tui = ["textual>=0.47.0"]
+all = [
+	"xgboost>=1.5.0",
+	"lightgbm>=3.2.0",
+	"catboost>=1.0.0",
+	"torch>=2.0.0",
+	"textual>=0.47.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Arefin994/mlbench-lite"
+Documentation = "https://github.com/Arefin994/mlbench-lite#readme"
+Repository = "https://github.com/Arefin994/mlbench-lite.git"
+"Bug Tracker" = "https://github.com/Arefin994/mlbench-lite/issues"
+
+[project.scripts]
+mlbench-lite = "mlbench_lite.cli:main"
+mlbench-lite-tui = "mlbench_lite.tui:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mlbench_lite*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+	"--strict-markers",
+	"--strict-config",
+	"--verbose",
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py38"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(\.eggs|\.git|\.hg|\.mypy_cache|\.tox|\.venv|build|dist)/
+'''
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = [
+	"sklearn.*",
+	"pandas.*",
+	"numpy.*",
+]
+ignore_missing_imports = true
