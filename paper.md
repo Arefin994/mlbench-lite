@@ -7,8 +7,13 @@ tags:
   - Performance Measurement
 authors:
   - name: Arefin Amin
-    orcid: 0000-0000-0000-0000
-    affiliation: Independent Researcher
+    orcid: 0009-0005-6177-9999
+    affiliation: 1
+  - name: Tahminuzzaman Nahian
+    affiliation: 1
+affiliations:
+  - name: North South University, Dhaka, Bangladesh
+    index: 1
 date: 14 September 2026
 bibliography: paper.bib
 ---
