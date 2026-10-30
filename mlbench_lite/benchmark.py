@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import time
 import warnings
 from typing import Callable, Dict, List, Optional, Tuple
@@ -26,7 +27,6 @@ from .deep_models import (
 from .preprocessing import build_scaler
 from .utils import set_seed
 
-warnings.filterwarnings("ignore")
 try:
     from sklearn.discriminant_analysis import (
         LinearDiscriminantAnalysis,
@@ -148,6 +148,42 @@ def _detect_task(y: np.ndarray, explicit: Optional[str]) -> str:
     return "classification"
 
 
+def _validate_X(X) -> None:
+    """mlbench-lite does not encode or impute features -- that's left to the
+    user so the preprocessing stays visible. Fail early with one clear
+    message instead of letting every model fail with its own error."""
+    if isinstance(X, pd.DataFrame):
+        non_numeric = [
+            c for c in X.columns
+            if not (pd.api.types.is_numeric_dtype(X[c]) or pd.api.types.is_bool_dtype(X[c]))
+        ]
+        if non_numeric:
+            raise ValueError(
+                f"X has non-numeric column(s) {non_numeric}. mlbench-lite expects numeric "
+                "features: encode categorical predictors first (e.g. pd.get_dummies or "
+                "sklearn's OneHotEncoder/OrdinalEncoder). Only the target y is label-encoded "
+                "automatically."
+            )
+        values = X.to_numpy(dtype=float, na_value=np.nan)
+    else:
+        try:
+            values = np.asarray(X, dtype=float)
+        except (TypeError, ValueError):
+            raise ValueError(
+                "X could not be converted to a numeric array. mlbench-lite expects numeric "
+                "features: encode categorical predictors before calling benchmark()."
+            ) from None
+    if np.isnan(values).any():
+        warnings.warn(
+            "X contains missing values (NaN). mlbench-lite does not impute; only models "
+            "with native missing-value support (XGBoost, LightGBM, CatBoost) will run, the "
+            "others will be reported with an Error. Impute X first (e.g. sklearn's "
+            "SimpleImputer) to benchmark every model.",
+            UserWarning,
+            stacklevel=3,
+        )
+
+
 def _maybe_pipeline(name: str, model, scaler_mode: Optional[str], X):
     if scaler_mode is None or name not in _SCALE_SENSITIVE:
         return model
@@ -243,10 +279,10 @@ def _select_models(
 
 def _eval_single_split(
     model, X_train, X_test, y_train, y_test, task: str
-) -> Tuple[Dict, float]:
-    t0 = time.time()
+) -> Tuple[Dict, float, float]:
+    t0 = time.perf_counter()
     model.fit(X_train, y_train)
-    train_time = round(time.time() - t0, 4)
+    train_time = round(time.perf_counter() - t0, 4)
     y_pred = model.predict(X_test)
     if task == "regression":
         rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
@@ -266,12 +302,13 @@ def _eval_single_split(
             ),
             "F1": round(f1_score(y_test, y_pred, average="macro", zero_division=0), 4),
         }
-    return metrics, train_time
+    total_time = round(time.perf_counter() - t0, 4)
+    return metrics, train_time, total_time
 
 
 def _eval_cross_validation(
     model, X, y, cv, task: str, groups=None
-) -> Tuple[Dict, float, Dict]:
+) -> Tuple[Dict, float, float, Dict]:
     if task == "regression":
         scoring = {
             "rmse": "neg_root_mean_squared_error",
@@ -285,11 +322,14 @@ def _eval_cross_validation(
             "recall": "recall_macro",
             "f1": "f1_macro",
         }
-    t0 = time.time()
+    t0 = time.perf_counter()
     cv_res = cross_validate(
         model, X, y, cv=cv, scoring=scoring, groups=groups, error_score="raise"
     )
-    total_time = round(time.time() - t0, 4)
+    total_time = round(time.perf_counter() - t0, 4)
+    # fit-only time summed over folds -- same definition as the single-split
+    # "Train Time (s)", so the two modes are comparable
+    train_time = round(float(np.sum(cv_res["fit_time"])), 4)
     if task == "regression":
         metrics = {
             "RMSE": round(float(-np.mean(cv_res["test_rmse"])), 4),
@@ -321,9 +361,23 @@ def _eval_cross_validation(
             "recall": cv_res["test_recall"].tolist(),
             "f1": cv_res["test_f1"].tolist(),
         }
-    return metrics, total_time, raw
+    return metrics, train_time, total_time, raw
 
 
+def _quiet_deprecations(fn):
+    """Constructing the registry can trigger sklearn deprecation notices for
+    estimators we still ship (e.g. PassiveAggressiveClassifier) -- that's our
+    concern to track, not the caller's, so keep it out of their output."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FutureWarning)
+            warnings.simplefilter("ignore", DeprecationWarning)
+            return fn(*args, **kwargs)
+    return wrapper
+
+
+@_quiet_deprecations
 def get_available_classifiers(random_state: int = 42) -> Dict:
     models: Dict = {}
     if not SKLEARN_CLF_AVAILABLE:
@@ -399,6 +453,7 @@ def get_available_classifiers(random_state: int = 42) -> Dict:
     return models
 
 
+@_quiet_deprecations
 def get_available_regressors(random_state: int = 42) -> Dict:
     models: Dict = {}
     if not SKLEARN_REG_AVAILABLE:
@@ -489,6 +544,26 @@ def benchmark(
     cancel_check: Optional[Callable[[], bool]] = None,
 ) -> pd.DataFrame:
     """
+    Input: X must be numeric (DataFrame or array). Categorical predictors
+    must be encoded and missing values imputed by the caller -- a non-numeric
+    column raises ValueError, NaNs raise a warning (only XGBoost, LightGBM
+    and CatBoost handle them natively). The only preprocessing done here is
+    label-encoding the target y (classification) and the optional scaling.
+
+    Metrics: classification reports accuracy and macro-averaged precision,
+    recall and F1 (every class weighted equally, regardless of size);
+    regression reports RMSE, MAE and R2. With cv=N each value is the mean
+    over the N test folds, with the fold standard deviation in *_std.
+
+    Timing columns:
+      "Train Time (s)" -- time spent in model.fit() only (including any
+                          scaling Pipeline step). With cv=N, summed over the
+                          N folds.
+      "Total Time (s)" -- wall-clock for the whole evaluation of that model:
+                          fit + predict + metric computation (all folds for
+                          cv=N). Excludes data splitting and the run's other
+                          models.
+
     New (all additive, nothing below changes existing behavior when unused):
 
     groups : array-like, optional
@@ -503,9 +578,12 @@ def benchmark(
         that warning.
     scaling : "standard" | "minmax" | "robust" | "log" | "l2" | "auto" | None
         Only applied to models known to be scale-sensitive (tree/boosting
-        models are left untouched either way). "auto" inspects each column
-        (see `preprocessing.recommend_scaling`) and picks a treatment per
-        column. `use_scaling=True` (legacy) is equivalent to scaling="standard".
+        models are left untouched either way). Scaling always sits inside a
+        Pipeline, so it is fitted on training data only. "auto" inspects each
+        column (see `preprocessing.recommend_scaling`) and picks a treatment
+        per column -- that choice is also made inside fit(), i.e. from the
+        training fold only (see `preprocessing.AutoScaler`).
+        `use_scaling=True` (legacy) is equivalent to scaling="standard".
         Nothing is scaled unless one of these is explicitly set.
     device : "cpu" | "gpu" | "auto"
         Affects XGBoost/LightGBM/CatBoost and the optional torch-based Deep
@@ -536,6 +614,7 @@ def benchmark(
     reproducible given the same `random_state`, not just the sklearn part.
     """
     set_seed(random_state)
+    _validate_X(X)
     y = np.asarray(y)
     detected_task = _detect_task(y, task)
     scaler_mode = (
@@ -616,22 +695,29 @@ def benchmark(
                 except Exception:
                     pass
             try:
-                if cv is None:
-                    metrics, train_time = _eval_single_split(
-                        fitted_model, X_train, X_test, y_train, y_test, detected_task
-                    )
-                else:
-                    metrics, train_time, raw = _eval_cross_validation(
-                        fitted_model,
-                        X,
-                        y,
-                        cv=cv_splits,
-                        task=detected_task,
-                        groups=None,
-                    )
+                # silence the estimators' own noise (convergence, collinearity, ...)
+                # only while they run -- not process-wide, so mlbench-lite's own
+                # warnings and the caller's are still shown
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    if cv is None:
+                        metrics, train_time, total_time = _eval_single_split(
+                            fitted_model, X_train, X_test, y_train, y_test, detected_task
+                        )
+                    else:
+                        metrics, train_time, total_time, raw = _eval_cross_validation(
+                            fitted_model,
+                            X,
+                            y,
+                            cv=cv_splits,
+                            task=detected_task,
+                            groups=None,
+                        )
+                if cv is not None:
                     raw_scores[model_name] = raw
                 row.update(metrics)
                 row["Train Time (s)"] = train_time
+                row["Total Time (s)"] = total_time
                 status = "done"
             except Exception as exc:
                 err_msg = str(exc)
@@ -641,6 +727,7 @@ def benchmark(
                     stacklevel=2,
                 )
                 row["Train Time (s)"] = None
+                row["Total Time (s)"] = None
                 row["Error"] = err_msg
                 status = "error"
             results.append(row)

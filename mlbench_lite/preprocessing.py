@@ -8,7 +8,14 @@ Two separate concerns, kept deliberately separate:
 
   * `build_scaler(X, mode)` -- Actually builds a transformer. Only called when
      the caller explicitly asks for it (either a fixed mode like "standard",
-     or "auto", which applies exactly what `recommend_scaling` reported).
+     or "auto", which returns an unfitted `AutoScaler`).
+
+"auto" is leakage-safe: `AutoScaler` runs `recommend_scaling` inside its own
+`fit()`, so the per-column choice (log / robust / standard / none) is made
+from whatever data it is fitted on. Inside `benchmark(..., cv=N)` that is the
+training part of each fold only -- the validation fold never influences
+either the choice of transform or its fitted parameters, and different folds
+may legitimately end up with different choices.
 
 Nothing here silently changes user data. `benchmark()` only applies scaling
 when the caller sets `scaling=...` (or the legacy `use_scaling=True`).
@@ -142,24 +149,13 @@ def _simple_scaler(mode: str):
     }[mode]
 
 
-def build_scaler(X, mode: str):
-    """Build a transformer for the requested mode.
-
-    mode: "standard" | "minmax" | "robust" | "log" | "l2" | "auto" | None
-    "auto" builds a per-column ColumnTransformer from recommend_scaling(X).
-    Never called unless the caller explicitly asked for scaling.
-    """
-    if mode is None or mode == "none":
-        return None
-    if mode != "auto":
-        return _simple_scaler(mode)
-
-    report = recommend_scaling(X)
+def _auto_column_transformer(report: pd.DataFrame):
+    """Turn a recommend_scaling() report into an (unfitted) ColumnTransformer,
+    or None if no column needs a transform."""
     # Use positional indices as the ColumnTransformer selector, not column names --
     # names only work when the exact same DataFrame (same dtype/columns) is passed
     # at both fit and transform time. Positions work for both DataFrames and plain
     # ndarrays, which matters since callers can pass either to benchmark().
-    n_cols = len(report)
     transformers = []
     passthrough_positions = []
     for pos, (_, row) in enumerate(report.iterrows()):
@@ -179,3 +175,45 @@ def build_scaler(X, mode: str):
     return ColumnTransformer(
         transformers, remainder="passthrough" if passthrough_positions else "drop"
     )
+
+
+class AutoScaler(BaseEstimator, TransformerMixin):
+    """Per-column scaling whose *choice* of transform is learned in fit().
+
+    fit(X) calls recommend_scaling(X) on the data it is given and builds the
+    matching per-column transformer, so when used inside a Pipeline under
+    cross-validation the decision only ever sees training-fold rows.
+
+    Fitted attributes:
+      report_      -- the recommend_scaling() report the decision was based on
+      transformer_ -- the fitted ColumnTransformer, or None if every column
+                      was left as-is
+    """
+
+    def fit(self, X, y=None):
+        self.report_ = recommend_scaling(X)
+        self.transformer_ = _auto_column_transformer(self.report_)
+        if self.transformer_ is not None:
+            self.transformer_.fit(X)
+        return self
+
+    def transform(self, X):
+        if self.transformer_ is None:
+            return np.asarray(X, dtype=float)
+        return self.transformer_.transform(X)
+
+
+def build_scaler(X, mode: str):
+    """Build a transformer for the requested mode.
+
+    mode: "standard" | "minmax" | "robust" | "log" | "l2" | "auto" | None
+    "auto" returns an unfitted AutoScaler -- X is *not* inspected here; the
+    per-column decision is made later in AutoScaler.fit(), on training data
+    only. (X is kept in the signature for backwards compatibility.)
+    Never called unless the caller explicitly asked for scaling.
+    """
+    if mode is None or mode == "none":
+        return None
+    if mode != "auto":
+        return _simple_scaler(mode)
+    return AutoScaler()

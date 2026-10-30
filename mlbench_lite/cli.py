@@ -237,21 +237,25 @@ def main() -> None:
               "--scaling / --scaling-mode is set):\n")
         print(recommend_scaling(X).to_string(index=False))
         print()
-    results = benchmark(
-        X,
-        y,
-        test_size=args.test_size,
-        random_state=args.random_state,
-        models=args.models,
-        model_categories=args.categories,
-        exclude_models=args.exclude,
-        cv=args.cv,
-        task=task,
-        scaling=scaling_mode,
-        device=args.device,
-        save_to=args.save_to,
-        show_std=not args.no_std,
-    )
+    try:
+        results = benchmark(
+            X,
+            y,
+            test_size=args.test_size,
+            random_state=args.random_state,
+            models=args.models,
+            model_categories=args.categories,
+            exclude_models=args.exclude,
+            cv=args.cv,
+            task=task,
+            scaling=scaling_mode,
+            device=args.device,
+            save_to=args.save_to,
+            show_std=not args.no_std,
+        )
+    except ValueError as exc:  # input problems, e.g. non-numeric feature columns
+        print(f"Error: {exc}\n")
+        sys.exit(1)
     if results.empty:
         detected_task = results.attrs.get("task", task or "classification")
         print("No results produced.\n")

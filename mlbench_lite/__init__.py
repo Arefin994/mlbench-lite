@@ -6,11 +6,11 @@ from .benchmark import (
     get_available_regressors,
 )
 from .datasets import load_clover
-from .preprocessing import recommend_scaling, build_scaler
+from .preprocessing import AutoScaler, recommend_scaling, build_scaler
 from .stats import compare_models
 from .utils import set_seed
 from .deep_models import TORCH_AVAILABLE
-__version__ = "3.3.0"
+__version__ = "3.4.0"
 __author__ = "Arefin Amin"
 __email__ = "arefinamin994@gmail.com"
 __all__ = [
@@ -22,6 +22,7 @@ __all__ = [
     "get_available_regressors",
     "recommend_scaling",
     "build_scaler",
+    "AutoScaler",
     "compare_models",
     "set_seed",
     "TORCH_AVAILABLE",
