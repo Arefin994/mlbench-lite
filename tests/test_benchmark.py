@@ -4,7 +4,9 @@ import pandas as pd
 import pytest
 from sklearn.datasets import make_classification, make_regression
 from mlbench_lite import (
+    AutoScaler,
     benchmark,
+    build_scaler,
     compare_models,
     get_model_info,
     list_available_models,
@@ -67,7 +69,7 @@ class TestClassificationBasic:
         X, y = clf_data
         r1 = benchmark(X, y, random_state=7)
         r2 = benchmark(X, y, random_state=7)
-        metric_cols = [c for c in r1.columns if c != "Train Time (s)"]
+        metric_cols = [c for c in r1.columns if c not in ("Train Time (s)", "Total Time (s)")]
         pd.testing.assert_frame_equal(r1[metric_cols], r2[metric_cols])
     def test_different_random_states_differ(self, clf_data):
         X, y = clf_data
@@ -169,6 +171,26 @@ class TestScaling:
             X, y, use_scaling=True, models=["Random Forest", "Decision Tree"]
         )
         assert len(results) == 2
+    def test_auto_scaling_with_cv(self, clf_data):
+        X, y = clf_data
+        results = benchmark(X, y, cv=3, scaling="auto", models=["Logistic Regression"])
+        assert "Error" not in results.columns
+    def test_build_scaler_auto_is_unfitted(self, clf_data):
+        X, _ = clf_data
+        scaler = build_scaler(X, "auto")
+        assert isinstance(scaler, AutoScaler)
+        assert not hasattr(scaler, "report_")
+    def test_auto_scaler_decides_from_fit_data_only(self):
+        rng = np.random.default_rng(0)
+        # column 0 is roughly normal in the first 200 rows, heavy-tailed overall
+        col = np.concatenate([rng.normal(50, 1, 200), rng.lognormal(6, 1.5, 100)])
+        X = np.column_stack([col, rng.normal(size=300)])
+        full = AutoScaler().fit(X)
+        train_only = AutoScaler().fit(X[:200])
+        assert full.report_.loc[0, "recommendation"] == "log"
+        assert train_only.report_.loc[0, "recommendation"] != "log"
+        out = train_only.transform(X[200:])  # unseen rows still transform
+        assert out.shape == (100, 2)
 class TestTrainingTime:
     def test_train_time_is_non_negative(self, clf_data):
         X, y = clf_data
@@ -181,6 +203,11 @@ class TestTrainingTime:
         r_single = benchmark(X, y, models=["Random Forest"])
         r_cv = benchmark(X, y, cv=3, models=["Random Forest"])
         assert r_cv["Train Time (s)"].iloc[0] >= r_single["Train Time (s)"].iloc[0]
+    @pytest.mark.parametrize("cv", [None, 3])
+    def test_total_time_covers_train_time(self, clf_data, cv):
+        X, y = clf_data
+        results = benchmark(X, y, cv=cv, models=["Random Forest"])
+        assert results["Total Time (s)"].iloc[0] >= results["Train Time (s)"].iloc[0]
 class TestErrorHandling:
     def test_failed_model_adds_error_column(self):
         X, y = make_classification(
@@ -200,6 +227,22 @@ class TestErrorHandling:
         X, y = clf_data
         with pytest.warns(UserWarning, match="No models matched"):
             benchmark(X, y, models=["NonExistentModel"])
+    def test_non_numeric_X_raises(self, clf_data):
+        X, y = clf_data
+        df = pd.DataFrame(X).assign(colour=["red", "blue", "green"] * 100)
+        with pytest.raises(ValueError, match="non-numeric"):
+            benchmark(df, y, models=["Random Forest"])
+    def test_nan_in_X_warns(self, clf_data):
+        X, y = clf_data
+        X = X.copy()
+        X[0, 0] = np.nan
+        with pytest.warns(UserWarning, match="missing values"):
+            benchmark(X, y, models=["Logistic Regression"])
+    def test_import_does_not_silence_global_warnings(self):
+        import warnings
+        import mlbench_lite  # noqa: F401
+        with pytest.warns(UserWarning, match="still visible"):
+            warnings.warn("still visible", UserWarning)
 class TestUtilities:
     def test_list_available_models_returns_dict(self):
         result = list_available_models()
@@ -259,6 +302,43 @@ class TestCompareModels:
         assert "friedman_p_value" in comparison
         assert "pairwise" in comparison
         assert len(comparison["pairwise"]) == 1
+    def test_min_attainable_p_for_five_folds(self, clf_data):
+        X, y = clf_data
+        results = benchmark(X, y, cv=5, models=["Random Forest", "Logistic Regression"])
+        with pytest.warns(UserWarning, match="no pair can be"):
+            comparison = compare_models(results)
+        assert comparison["min_attainable_p"] == pytest.approx(0.0625)
+        assert comparison["can_reach_significance"] is False
+        assert not comparison["pairwise"]["significant_at_alpha"].any()
+    def test_no_unreachable_warning_with_ten_folds_two_models(self, clf_data):
+        import warnings
+        X, y = clf_data
+        results = benchmark(X, y, cv=10, models=["Random Forest", "Logistic Regression"])
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            comparison = compare_models(results)
+        assert comparison["can_reach_significance"] is True
+        assert comparison["friedman_p_value"] is None
+    def test_few_folds_warns(self, clf_data):
+        X, y = clf_data
+        results = benchmark(X, y, cv=3, models=["Random Forest", "Logistic Regression"])
+        with pytest.warns(UserWarning, match="Only 3 CV folds"):
+            compare_models(results)
+    def test_pairs_gated_by_non_significant_friedman(self):
+        fake = pd.DataFrame({"Model": ["a", "b", "c"]})
+        # mean ranks are tied across the three models -> Friedman p = 1.0
+        base = np.linspace(0.80, 0.90, 12)
+        fake.attrs["raw_scores"] = {
+            "a": {"accuracy": list(base + 0.001)},
+            "b": {"accuracy": list(base + np.where(np.arange(12) % 2, 0.002, 0.0))},
+            "c": {"accuracy": list(base + np.where(np.arange(12) % 2, 0.0, 0.002))},
+        }
+        comparison = compare_models(fake, metric="accuracy")
+        assert not comparison["friedman_significant"]
+        assert comparison["pairwise"]["gated_by_friedman"].all()
+        assert not comparison["pairwise"]["significant_at_alpha"].any()
+        ungated = compare_models(fake, metric="accuracy", posthoc_only=False)
+        assert not ungated["pairwise"]["gated_by_friedman"].any()
 
 
 class TestSetSeed:

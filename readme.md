@@ -102,8 +102,12 @@ print(results)   # RMSE / MAE / R2 columns instead of Accuracy / Precision / Rec
 
 Benchmark multiple machine learning models on a dataset.
 
+**What input it expects:**
+- `X` must be **numeric** (a DataFrame or array). mlbench-lite does not encode categorical predictors or impute missing values  do that yourself first (e.g. `pd.get_dummies`, `OneHotEncoder`, `SimpleImputer`) so the preprocessing stays visible and under your control. A non-numeric column raises a `ValueError` up front. `NaN` values raise a warning: only XGBoost, LightGBM and CatBoost handle them natively; the other models will show up with an `Error`.
+- The only preprocessing `benchmark()` does itself: label-encoding the **target** `y` for classification (string or non-contiguous labels), and the optional `scaling=` for scale-sensitive models, which always runs inside a scikit-learn `Pipeline` (fitted on training data only).
+
 **Parameters:**
-- `X` (array-like): Feature matrix of shape (n_samples, n_features)
+- `X` (array-like): Numeric feature matrix of shape (n_samples, n_features)
 - `y` (array-like): Target values of shape (n_samples,)
 - `test_size` (float, optional): Proportion of dataset for testing when `cv` is not set (default: 0.2)
 - `random_state` (int, optional): Random seed for reproducibility (default: 42)
@@ -114,7 +118,7 @@ Benchmark multiple machine learning models on a dataset.
 - `groups` (array-like, optional): Group label per row (e.g. a shared config/subject/source id). When set, splitting uses `GroupShuffleSplit`/`GroupKFold` so rows sharing a group never end up split across train and test  prevents near-duplicate rows from inflating your score. See "Why groups matter" below.
 - `task` ("classification" | "regression" | None, optional): Force the task instead of relying on auto-detection. Auto-detection warns when it's guessing on an ambiguous case (an integer-dtype target with many unique values)  pass this explicitly if you see that warning.
 - `use_scaling` (bool, optional): Legacy flag, equivalent to `scaling="standard"`. Kept for backward compatibility.
-- `scaling` ("standard" | "minmax" | "robust" | "log" | "l2" | "auto" | None, optional): Only applied to models known to be scale-sensitive (tree/boosting models are always left raw). `"auto"` inspects each column and picks a treatment per column  see `recommend_scaling()` below. Nothing is scaled unless this (or `use_scaling`) is explicitly set.
+- `scaling` ("standard" | "minmax" | "robust" | "log" | "l2" | "auto" | None, optional): Only applied to models known to be scale-sensitive (tree/boosting models are always left raw). `"auto"` inspects each column and picks a treatment per column  see `recommend_scaling()` below. That choice is made inside `fit()`, so with `cv=N` it is made from each training fold only (the validation fold never influences it). Nothing is scaled unless this (or `use_scaling`) is explicitly set.
 `RandomizedSearchCV`. Models without a defined grid still run, with defaults, unchanged.
 - `device` ("cpu" | "gpu" | "auto", optional, default: "cpu"): Affects XGBoost/LightGBM/CatBoost and the optional Deep Tabular (torch) models. `"auto"` checks for an available GPU and picks accordingly; `"gpu"` attempts GPU regardless and falls back to CPU with a warning if it can't be set (same as before). Models without GPU support are unaffected either way.
 - `save_to` (str, optional): Path to write results to  `.csv` or `.json`, inferred from the extension.
@@ -125,7 +129,9 @@ Benchmark multiple machine learning models on a dataset.
 **Reproducibility note:** `benchmark()` seeds Python's `random`, NumPy, and (if installed) PyTorch/CUDA once at the start of every run, using `random_state`  on top of passing `random_state` to every individual estimator/split as before. So a full run, sklearn models and Deep Tabular models together, is reproducible end to end given the same `random_state`.
 
 **Returns:**
-- `pandas.DataFrame`: Results, sorted best-first. For classification: `Model`, `Category`, `Accuracy`, `Precision`, `Recall`, `F1` (+ `_std` variants when `cv` is set). For regression: `Model`, `Category`, `RMSE`, `MAE`, `R2` (+ `_std` variants when `cv` is set). Always includes `Train Time (s)`, and an `Error` column for any model that failed (results for other models are unaffected).
+- `pandas.DataFrame`: Results, sorted best-first. For classification: `Model`, `Category`, `Accuracy`, `Precision`, `Recall`, `F1` (+ `_std` variants when `cv` is set). For regression: `Model`, `Category`, `RMSE`, `MAE`, `R2` (+ `_std` variants when `cv` is set). Always includes `Train Time (s)` and `Total Time (s)`, and an `Error` column for any model that failed (results for other models are unaffected).
+  - **Metric definitions:** precision, recall and F1 are **macro-averaged** (each class counts equally, regardless of size)  for binary and multiclass alike. With `cv=N` every metric is the mean over the N test folds, with the fold standard deviation in the `_std` column.
+  - **Timing definitions:** `Train Time (s)` is time spent in `fit()` only (including any scaling step in the pipeline); with `cv=N` it is summed over all N folds. `Total Time (s)` is the wall-clock for evaluating that model end to end: fit + predict + metric computation (all folds with `cv`). Neither includes data splitting or other models in the run.
   - `results.attrs["raw_scores"]`: per-fold scores (only populated when `cv` is set)  feed this straight into `compare_models()`.
   - `results.attrs["task"]`: `"classification"` or `"regression"`, whichever was detected/used.
 
@@ -157,22 +163,29 @@ set_seed(42)
 # ... your own data prep / model code, now reproducible too
 ```
 
-### `compare_models(results, metric=None, alpha=0.05)`
+### `compare_models(results, metric=None, alpha=0.05, posthoc_only=True)`
 
-Statistical significance testing between models, using the per-fold scores from a `cv=`-based `benchmark()` run. Requires `cv >= 2`  a single train/test split gives one number per model, which isn't enough to test significance on.
+Statistical comparison between models, using the per-fold scores from a `cv=`-based `benchmark()` run. Requires `cv >= 2`  a single train/test split gives one number per model, which isn't enough to test significance on.
+
+**How to interpret it  an exploratory screen, not formal inference:**
+- **Fold scores are not independent.** k-fold training sets overlap, so the Friedman/Wilcoxon independence assumption doesn't hold and p-values are optimistic. Treat "significant" as "worth a closer look", not proof.
+- **Workflow.** With 3+ models, the Friedman test asks whether *any* model differs; the pairwise Wilcoxon signed-rank tests are post-hoc comparisons, and by default (`posthoc_only=True`) a pair is only flagged significant if Friedman was. With exactly 2 models Friedman doesn't apply, and the single Wilcoxon test is reported directly.
+- **Multiple comparisons.** Pairwise p-values are Bonferroni-corrected (p × number of pairs)  the simplest familywise correction, and conservative.
+- **Fold count limits what's reachable.** With n folds (no ties), the smallest exact two-sided Wilcoxon p-value is 2 / 2ⁿ  0.0625 for 5 folds, so nothing can be significant at 0.05 even before correction. `compare_models()` reports this bound and warns when significance is unreachable (and when fewer than 5 folds are used). **Use `cv=10` or more if you intend to test.**
 
 **Parameters:**
 - `results` (pandas.DataFrame): output of `benchmark(..., cv=N)`
 - `metric` (str, optional): which metric to compare on (defaults to `r2` for regression, `accuracy` for classification)
 - `alpha` (float, optional): significance threshold (default: 0.05)
+- `posthoc_only` (bool, optional): only flag pairwise differences when the Friedman test is significant (default: True)
 
 **Returns:**
-- `dict`: `friedman_statistic`, `friedman_p_value`, `friedman_significant`, and a `pairwise` DataFrame with per-pair means, Wilcoxon p-values, Bonferroni-corrected p-values, and a `significant_at_alpha` flag.
+- `dict`: `friedman_statistic`, `friedman_p_value`, `friedman_significant`, `n_folds`, `n_comparisons`, `min_attainable_p`, `min_attainable_p_bonferroni`, `can_reach_significance`, a `note`, and a `pairwise` DataFrame with per-pair means, Wilcoxon p-values, Bonferroni-corrected p-values, a `significant_at_alpha` flag and `gated_by_friedman`.
 
 ```python
 from mlbench_lite import benchmark, compare_models
 
-results = benchmark(X, y, cv=5, models=["Random Forest", "Ridge", "SVR"], task="regression")
+results = benchmark(X, y, cv=10, models=["Random Forest", "Ridge", "SVR"], task="regression")
 comparison = compare_models(results)
 print(comparison["friedman_p_value"])
 print(comparison["pairwise"])
@@ -329,7 +342,8 @@ from mlbench_lite import benchmark, recommend_scaling
 report = recommend_scaling(X)
 print(report)
 
-# Apply exactly what the report suggested, per column
+# Apply a per-column treatment chosen the same way -- but decided inside each
+# training fold / training split, never from the test data
 results = benchmark(X, y, scaling="auto")
 
 # Or force one mode for everything scale-sensitive:
@@ -431,7 +445,8 @@ from mlbench_lite import benchmark, compare_models, load_clover
 
 X, y = load_clover(return_X_y=True)
 
-results = benchmark(X, y, cv=5, models=["Random Forest", "Logistic Regression", "SVM (RBF)"])
+# cv=10: with only 5 folds no Wilcoxon p-value can drop below 0.0625
+results = benchmark(X, y, cv=10, models=["Random Forest", "Logistic Regression", "SVM (RBF)"])
 comparison = compare_models(results)
 
 print("Any model significantly different from the others?", comparison["friedman_significant"])
@@ -470,8 +485,9 @@ X, y = load_clover(return_X_y=True)
 
 results1 = benchmark(X, y, random_state=123)
 results2 = benchmark(X, y, random_state=123)
-print(f"Results are identical: {results1.drop(columns=['Train Time (s)']).equals(results2.drop(columns=['Train Time (s)']))}")
-# (Train Time (s) is wall-clock timing and will naturally differ run to run --
+timing = ['Train Time (s)', 'Total Time (s)']
+print(f"Results are identical: {results1.drop(columns=timing).equals(results2.drop(columns=timing))}")
+# (the timing columns are wall-clock and will naturally differ run to run --
 # exclude it when checking for reproducibility, everything else is deterministic.)
 ```
 
@@ -518,7 +534,7 @@ Non-contiguous integer classification targets (e.g. labels that skip values) are
 | `"robust"` | Median/IQR based | Data with outliers |
 | `"log"` | log1p, then scale | Heavy-tailed / long-tail count data |
 | `"l2"` | Row-wise unit-norm (`Normalizer`) | Text/TF-IDF-style data, cosine-distance use cases  **situational**, not auto-selected, since it mixes units across columns and tends to hurt on typical mixed-unit tabular data |
-| `"auto"` | Picks per-column from `recommend_scaling()` | When you don't want to decide column by column |
+| `"auto"` | Picks per-column from `recommend_scaling()`, decided on training data only (`AutoScaler`) | When you don't want to decide column by column |
 | `None` (default) | Off | When your models don't need it (e.g. all tree-based) |
 
 Only applied to scale-sensitive models (linear/SVM/KNN/MLP-type models, including the optional Torch MLP / FT-Transformer)  tree and boosting models are always left raw, since scaling doesn't change how they split.
@@ -699,6 +715,15 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 5. Open a Pull Request
 
 ## 📈 Changelog
+
+### 3.4.0
+- **FIX**: `scaling="auto"` is now leakage-safe. The per-column choice of transform used to be made once from the full dataset before splitting; it is now made inside `fit()` by the new `AutoScaler` transformer, i.e. from each training fold / training split only
+- **FIX**: consistent timing. `Train Time (s)` now means fit time only in both modes (summed over folds with `cv`); previously the CV value also included prediction and scoring. **NEW** `Total Time (s)` column = fit + predict + scoring
+- **NEW**: `compare_models()` safeguards  reports the smallest attainable Wilcoxon p-value for the fold count, warns when no pair can reach significance or when fewer than 5 folds are used, and by default only flags pairwise differences after a significant Friedman test (`posthoc_only=True`)
+- **FIX**: importing mlbench-lite no longer silences *all* Python warnings process-wide; estimator warnings (convergence etc.) are now only suppressed while each model is being evaluated, so mlbench-lite's own warnings reach the user
+- **NEW**: `benchmark()` checks `X` up front  clear `ValueError` for non-numeric columns, warning for missing values
+- **NEW**: `examples/` scripts  regression, group-aware splitting, statistical comparison
+- Docs: input requirements, macro-averaged metrics, timing definitions, how to interpret the statistical tests
 
 ### 3.3.0
 - **NEW**: `benchmark(..., progress_callback=..., cancel_check=...)`  optional hooks for UIs. `progress_callback(completed, total, model_name, status)` fires after each model; `cancel_check()` is polled before each model (and between epochs for the optional Deep Tabular torch models) to support graceful early stopping with partial results (`results_df.attrs["cancelled"]`)
